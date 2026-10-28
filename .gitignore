@@ -1,0 +1,61 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+
+# environment & secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# database
+*.sqlite
+*.sqlite3
+prisma/dev.db*
+
+# generated prisma client
+packages/db/src/generated/
+
+# test & coverage
+coverage/
+.nyc_output/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# throwaway verification scripts — not part of the submission, left in place
+# on purpose after use (rather than deleted) so they're inspectable
+**/scratch.ts
+**/smoke-*.ts
+
+# scripts/issue-mandate.ts output — generated, run-specific, holds a signature
+mandate.json
+
+# scripts/dispute.ts output — generated per trace, not a single canonical
+# artifact like eval/report.md; copy one deliberately if you want an example
+disputes/
+
+# personal working notes — not part of the submission
+/private/
+.claude
+/social/
+test-screenshots
+PORTFOLIO_REPORT.md
+
+CLAUDE.md

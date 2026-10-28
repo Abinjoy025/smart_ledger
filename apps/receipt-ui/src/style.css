@@ -1,0 +1,807 @@
+/* Praman receipt viewer — design tokens.
+   Security-paper reference: the pale blue-green tint on checks and bonds
+   exists specifically to resist tampering — a fitting base for a
+   hash-chained, tamper-evident record. Each accent below is tied to a real
+   decision/verification state, not decorative. */
+
+:root {
+  --paper: #edf1ee;
+  --paper-raised: #e4ebe6;
+  --ink: #172420;
+  /* Reserved for the one or two hero moments per page (the index masthead
+     count, a trace's decision headline) — deeper than --ink so those two
+     spots carry real weight instead of the scale doing all the work. */
+  --ink-hero: #0d1613;
+  --ink-muted: #4b5b55;
+  --verified: #2e6b4c;
+  --step-up: #a6752e;
+  /* --step-up itself is 3.54:1 against --paper — fine for large text (the
+     trace hero headline, checked at WCAG's 3:1 large-text threshold) but
+     short of the 4.5:1 normal-text threshold. This darker variant (4.92:1)
+     is for the small-text spots: the index row's step-up decision label,
+     the stamp, and the untrusted-content note. Borders/backgrounds keep
+     using --step-up itself — non-text contrast isn't held to 4.5:1. */
+  --step-up-text: #8a5f22;
+  --refused: #9e3b2e;
+  --hairline: #c7d0c9;
+
+  /* Noto Serif as a fallback before the generic keyword, not after PT
+     Serif directly — PT Serif (and Georgia/Times) render the Indian
+     Rupee sign (U+20B9) as a wrong glyph on some systems rather than
+     falling back per-character; Noto Serif has full coverage and only
+     gets used for the characters PT Serif actually lacks. */
+  --serif: "PT Serif", Georgia, "Times New Roman", "Noto Serif", serif;
+  --mono: "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
+
+  /* Modular scale, 1.25 ratio, base 17px — a document read carefully, not a display page. */
+  --size-sm: 0.85rem;
+  --size-base: 1.0625rem;
+  --size-md: 1.328rem;
+  --size-lg: 1.66rem;
+  --size-xl: 2.074rem;
+  /* A deliberate jump past the modular scale, not another step of it —
+     spent in exactly two places so it stays a hero, not a bigger default. */
+  --size-hero: 3.4rem;
+
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.75rem;
+  --space-4: 2.75rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  margin: 0;
+  /* The security-paper tint made tactile: a faint turbulence grain, the
+     same idea as the watermark fibres in a real check or bond, generated
+     inline so there's no image asset to ship. The feColorMatrix strips
+     colour from the turbulence (raw feTurbulence is RGB static, not a
+     neutral grain), and fill-opacity keeps it at texture strength. */
+  background: var(--paper)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' fill-opacity='0.02'/%3E%3C/svg%3E")
+    repeat;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: var(--size-base);
+  line-height: 1.55;
+}
+
+.record {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-2) var(--space-4);
+}
+
+a {
+  color: var(--ink);
+}
+
+/* Anything that IS data — hashes, trace ids, reason codes, amounts —
+   gets mono and tabular figures so columns of digits actually align. */
+code,
+.data {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rupee {
+  font-family: var(--mono);
+}
+
+.nav {
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  color: var(--ink-muted);
+  margin-bottom: var(--space-3);
+}
+
+.nav a {
+  color: var(--ink-muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The index masthead — the one hero moment on this page, styled like the
+   ornamental header on a bank draft: a serial-number-style count and the
+   chain's own integrity status, hairline-bounded, nothing else competing
+   with it. Both numbers are real, read off the same data the row badges
+   below already use — not decorative. */
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 var(--space-3);
+  margin-bottom: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.masthead-count {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+}
+
+.masthead-number {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--size-hero);
+  font-weight: 500;
+  color: var(--ink-hero);
+  line-height: 1;
+}
+
+.masthead-label {
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  color: var(--ink-muted);
+}
+
+.masthead-chain {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35em;
+}
+
+.masthead-chain-detail {
+  font-size: var(--size-sm);
+  color: var(--ink-muted);
+}
+
+/* Hero: verification state + decision, together, above everything else.
+   The negative horizontal margin exactly cancels .record's own padding,
+   so the tint reaches the true left/right edge of the reading column — a
+   letterhead band across the page, not a boxed card floating inside it
+   (no border-radius, no shadow — that's the tell this is deliberately
+   avoiding). */
+.hero {
+  margin: 0 calc(-1 * var(--space-2)) var(--space-3);
+  padding: var(--space-2);
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+
+/* A flat tint with no edge of its own reads as an accidental smudge, not
+   a deliberate panel — the same problem the chain-break marker (D-25)
+   already solved by pairing its background with colored top/bottom
+   rules. Reusing that exact device here instead of inventing a new one:
+   low-strength fill (6-7%) plus a hairline in the same color, so the
+   band's boundary is drawn on purpose. */
+.hero.decision-allow {
+  background: color-mix(in srgb, var(--verified) 6%, var(--paper));
+  border-color: color-mix(in srgb, var(--verified) 32%, var(--paper));
+}
+
+.hero.decision-step-up {
+  background: color-mix(in srgb, var(--step-up) 7%, var(--paper));
+  border-color: color-mix(in srgb, var(--step-up) 32%, var(--paper));
+}
+
+.hero.decision-deny {
+  background: color-mix(in srgb, var(--refused) 6%, var(--paper));
+  border-color: color-mix(in srgb, var(--refused) 32%, var(--paper));
+}
+
+.hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  font-weight: 600;
+  padding: 0.25em 0.7em;
+  border-radius: 3px;
+}
+
+#verify-btn {
+  font-size: var(--size-sm);
+  padding: 0.4em 0.9em;
+}
+
+#verify-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* A hairline border in the state's own color, not just a tinted fill — an
+   outlined chip reads more like a stamped mark on paper, and holds up
+   better in a dense list where a dozen soft fills side by side would blur
+   together. */
+.state {
+  border: 1px solid transparent;
+}
+
+.state.state-verified {
+  background: color-mix(in srgb, var(--verified) 10%, var(--paper));
+  color: var(--verified);
+  border-color: color-mix(in srgb, var(--verified) 40%, var(--paper));
+}
+
+.state.state-unverified {
+  background: color-mix(in srgb, var(--ink-muted) 9%, var(--paper));
+  color: var(--ink-muted);
+  border-color: color-mix(in srgb, var(--ink-muted) 35%, var(--paper));
+}
+
+.state.state-broken {
+  background: color-mix(in srgb, var(--refused) 12%, var(--paper));
+  color: var(--refused);
+  border-color: color-mix(in srgb, var(--refused) 45%, var(--paper));
+}
+
+.decision {
+  font-size: var(--size-xl);
+  font-weight: 700;
+  margin: 0 0 0.15em;
+}
+
+/* The trace hero's own decision line gets the reserved hero scale — the
+   one other spot besides the index masthead number that's meant to read
+   at a glance. Only the size changes here; color still comes from the
+   decision-allow/step-up/deny rules below, since a neutral hero-ink
+   would erase the one signal that actually matters on this page. */
+.hero .decision {
+  font-size: var(--size-hero);
+  line-height: 1.05;
+}
+
+.decision.decision-allow,
+.decision.decision-executed {
+  color: var(--verified);
+}
+
+.decision.decision-step-up {
+  color: var(--step-up);
+}
+
+.decision.decision-deny,
+.decision.decision-refused {
+  color: var(--refused);
+}
+
+.amount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--size-md);
+  color: var(--ink-muted);
+}
+
+.goal {
+  font-size: var(--size-md);
+  margin: var(--space-2) 0;
+}
+
+.goal-label {
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  color: var(--ink-muted);
+  display: block;
+  margin-bottom: 0.2em;
+}
+
+/* The reason, in plain language first, machine code beside it. */
+.reason {
+  margin: var(--space-2) 0;
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.reason-plain {
+  margin: 0 0 0.3em;
+}
+
+.reason-code {
+  color: var(--ink-muted);
+}
+
+section {
+  margin: var(--space-3) 0;
+}
+
+h2 {
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  font-weight: 600;
+  color: var(--ink-muted);
+  margin: 0 0 var(--space-1);
+}
+
+.rationale {
+  font-style: italic;
+}
+
+/* Untrusted merchant content — the single most important visual signal in
+   the whole page. A dashed border reads as "unfinished" or "placeholder";
+   what this actually needs to say is "this text came from outside and was
+   checked before it got here" — the same thing a real audited document
+   marks with a rubber stamp, not a dotted line. The soft halo (box-shadow)
+   approximates an ink impression bleeding slightly past the stamp's own
+   edge, without needing an SVG filter to fake a rough border. */
+.untrusted {
+  border: 1px solid color-mix(in srgb, var(--step-up) 45%, var(--paper));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--step-up) 6%, transparent);
+  padding: var(--space-2);
+  margin: var(--space-3) 0 var(--space-2);
+  background: color-mix(in srgb, var(--step-up) 4%, var(--paper));
+  position: relative;
+}
+
+/* The stamp itself: a small tab overlapping the box's own top edge, tilted
+   like it was pressed down by hand rather than laid out square. */
+.stamp {
+  position: absolute;
+  top: -0.85em;
+  left: 1.1em;
+  transform: rotate(-2deg);
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--size-sm);
+  font-weight: 600;
+  color: var(--step-up-text);
+  background: var(--paper);
+  padding: 0.15em 0.6em;
+  border: 1.5px solid color-mix(in srgb, var(--step-up) 55%, var(--paper));
+  border-radius: 2px;
+}
+
+.untrusted-note {
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  color: var(--step-up-text);
+  margin: 0.4em 0 0.7em;
+}
+
+/* One product per card — a reviewer can read each item's own description
+   on its own, rather than six items' worth of text run together. */
+.merchant-item {
+  margin: var(--space-2) 0;
+}
+
+.merchant-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1em;
+}
+
+.merchant-item-title {
+  font-weight: 700;
+}
+
+.merchant-item-price {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.merchant-item-sku {
+  color: var(--ink-muted);
+  font-size: var(--size-sm);
+}
+
+.merchant-item .untrusted-content {
+  margin: 0;
+}
+
+/* The chain, drawn as a single continuous spine rather than a list with
+   connectors between items. Each entry hangs off one unbroken rule; where
+   the chain is intact the rule never breaks, so a break (D-25/commit 7)
+   reads as a real severing, not a missing decoration. */
+.spine {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 2rem;
+}
+
+.spine::before {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  top: 0.6rem;
+  bottom: 0.6rem;
+  width: 2px;
+  background: var(--hairline);
+}
+
+.entry {
+  position: relative;
+  padding: 0 0 var(--space-2);
+}
+
+.entry:last-child {
+  padding-bottom: 0;
+}
+
+.entry::before {
+  content: "";
+  position: absolute;
+  left: -1.4rem;
+  top: 0.35em;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--ink-muted);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+/* The verify walk recolours each dot as it's checked, travelling down the
+   spine — motion that shows real work happening, not a flipped badge. The
+   settle animation gives each dot a small pop as it lands, so the walk
+   reads as a sequence of individual checks landing one by one rather than
+   a color just sweeping down the line. */
+@keyframes dot-settle {
+  0% {
+    transform: scale(0.5);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.entry.entry-confirmed::before,
+.entry.entry-broken::before {
+  animation: dot-settle 220ms ease-out;
+}
+
+.entry.entry-confirmed::before {
+  background: var(--verified);
+  border-color: var(--verified);
+}
+
+.entry.entry-broken::before {
+  background: var(--refused);
+  border-color: var(--refused);
+}
+
+/* Never reached by the walk because it stopped at an earlier break —
+   distinct from both confirmed and broken. This entry might be perfectly
+   fine; the point is that nothing here vouches for it either way. */
+.entry.entry-unresolved {
+  opacity: 0.55;
+}
+
+/* The one place the spine's own rule actually breaks, inserted by the
+   verify walk right after the entry it stopped at. Its background matches
+   the page, so it visually cuts the continuous line behind it rather than
+   just sitting beside it — the rule breaks, not just the dot. */
+.chain-break {
+  position: relative;
+  margin: 0.5em 0 0.5em -2rem;
+  padding: 0.6em 0 0.6em 2rem;
+  background: var(--paper);
+  border-top: 2px solid var(--refused);
+  border-bottom: 2px solid var(--refused);
+  color: var(--refused);
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+  font-weight: 600;
+}
+
+/* A small diamond sitting exactly where the spine's own line gets cut by
+   this marker's background — the gap in the line reads as "the link
+   broke exactly here," not just "something changed somewhere near this
+   point." Same left offset as .entry::before, so it sits on the spine's
+   actual line rather than beside it. */
+.chain-break::before {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--refused);
+}
+
+.chain-break .data {
+  font-weight: 400;
+  color: var(--refused);
+}
+
+.entry-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+}
+
+.entry-type {
+  font-weight: 600;
+}
+
+.entry-seq {
+  font-family: var(--mono);
+  font-size: var(--size-sm);
+  color: var(--ink-muted);
+}
+
+/* The one deliberate repetition: this entry's entry_hash and the next
+   entry's prev_hash render at the same indent, same size, directly
+   adjacent — read one after the other, they're either visibly the same
+   string, or visibly not. That comparison IS the continuity check. */
+.entry-hash {
+  font-family: var(--mono);
+  font-size: var(--size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+  margin: 0.15em 0;
+}
+
+.entry-hash .hash-label {
+  color: var(--ink-muted);
+  opacity: 0.7;
+}
+
+.entry-hash .hash-value {
+  color: var(--ink);
+}
+
+button {
+  font-family: var(--sans);
+  font-size: var(--size-base);
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  padding: 0.6em 1.2em;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--step-up);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* The index — a plain list of records, not a dashboard grid. */
+.trace-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.trace-row {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.trace-row:first-child {
+  border-top: 1px solid var(--hairline);
+}
+
+.trace-row-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 0.65em 0.6em;
+  margin: 0 -0.6em;
+  text-decoration: none;
+  color: var(--ink);
+  border-radius: 3px;
+  transition: background-color 120ms ease;
+}
+
+.trace-row-link:hover {
+  background: var(--paper-raised);
+}
+
+.trace-row-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed-width columns, not a loose flex row — this is a ledger, and a
+   ledger's numbers line up whether or not the row next to them has a
+   longer decision label. The amount span is always present (even empty)
+   so the column count never changes row to row. */
+.trace-row-meta {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, auto) minmax(4.5rem, auto) minmax(4.5rem, auto);
+  align-items: center;
+  column-gap: var(--space-2);
+  flex-shrink: 0;
+  font-family: var(--sans);
+  font-size: var(--size-sm);
+}
+
+.trace-row-meta .decision {
+  font-size: var(--size-sm);
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* At this small size, --step-up itself falls short of WCAG's 4.5:1
+   normal-text threshold (it clears the 3:1 large-text one, which is why
+   the trace hero's own headline keeps using --step-up directly). */
+.trace-row-meta .decision.decision-step-up {
+  color: var(--step-up-text);
+}
+
+.trace-row-meta .data {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.trace-row-meta .state {
+  padding: 0.15em 0.5em;
+  margin: 0;
+  justify-self: end;
+}
+
+.print-footer {
+  display: none;
+}
+
+/* Below 640px the reading column already fills the viewport (.record's
+   own max-width), so this is the point real content stops fitting on one
+   line: the trace-row's three-column meta grid, the hero headline at its
+   full display size, and the masthead's side-by-side layout all need to
+   give way to stacking instead of shrinking illegibly. */
+@media (max-width: 640px) {
+  :root {
+    --size-hero: 2.4rem;
+  }
+
+  .masthead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .masthead-chain {
+    align-items: flex-start;
+  }
+
+  .hero-top {
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+  }
+
+  .trace-row-link {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 0.3em;
+  }
+
+  .trace-row-meta {
+    grid-template-columns: 1fr auto auto;
+    width: 100%;
+  }
+
+  .entry-header {
+    flex-wrap: wrap;
+  }
+}
+
+/* A dispute officer prints this. Truncated hashes and an interactive
+   button don't belong on paper; the full hash and the page's own URL do —
+   a printout with no way back to its source record is nearly useless. */
+@media print {
+  body {
+    background: #fff;
+    background-image: none;
+  }
+
+  .nav,
+  #verify-btn {
+    display: none;
+  }
+
+  /* .hero.decision-allow/-step-up/-deny (D-32) are 2-class selectors with
+     no media qualifier of their own, so they apply in print too and beat
+     a plain .hero override on specificity regardless of source order —
+     matching their specificity here, one level up from the original
+     commit 4 attempt, is what actually makes this win. Caught via the
+     reconstructed-print-CSS technique (D-25/D-27), not by inspection: the
+     wash was still showing in every previous print check because no
+     check had actually re-applied these rules together before now. */
+  .hero,
+  .hero.decision-allow,
+  .hero.decision-step-up,
+  .hero.decision-deny {
+    background: none;
+    border: none;
+    margin: 0 0 var(--space-2);
+    padding: 0;
+  }
+
+  .hero-top {
+    justify-content: flex-start;
+  }
+
+  /* Reveal the full hash via the value already carried in data-full
+     (commit 3) rather than the on-screen 8-character prefix. Shrinking the
+     original text to nothing, instead of hiding it, keeps this to a CSS
+     rule with no JS needed for print specifically. */
+  .hash-value {
+    font-size: 0;
+  }
+
+  .hash-value::after {
+    content: attr(data-full);
+    font-size: var(--size-sm);
+  }
+
+  .entry,
+  .merchant-item {
+    break-inside: avoid;
+  }
+
+  /* Same reasoning as .hero above: print relies on structure and text,
+     not color, since a print engine's handling of background-color and
+     box-shadow is inconsistent across browsers and print settings the
+     page has no control over. Flattening the untrusted callout to plain
+     ink-on-white keeps it legible regardless. The stamp specifically also
+     drops its absolute-position overlap with the box's top border —
+     that trick depends on the stamp's own background painting over the
+     border, which a printer that skips backgrounds would render as a
+     border line cutting through the stamp text. */
+  .untrusted {
+    background: none;
+    border-color: var(--ink);
+    box-shadow: none;
+  }
+
+  .stamp {
+    position: static;
+    transform: none;
+    display: inline-block;
+    margin: 0 0 0.4em;
+    background: none;
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+
+  .untrusted-note {
+    color: var(--ink);
+  }
+
+  /* A filled shape has nothing to show if the printer skips backgrounds;
+     the border keeps the marker visible either way. */
+  .chain-break::before {
+    border: 1px solid var(--refused);
+  }
+
+  .print-footer {
+    display: block;
+    margin-top: var(--space-3);
+    padding-top: var(--space-1);
+    border-top: 1px solid var(--hairline);
+    font-family: var(--mono);
+    font-size: var(--size-sm);
+    color: var(--ink-muted);
+  }
+}

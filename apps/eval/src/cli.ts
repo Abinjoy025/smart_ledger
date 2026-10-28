@@ -1,0 +1,119 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { env } from "node:process";
+import { fileURLToPath } from "node:url";
+import { GeminiProvider } from "@praman/agent-core";
+import { computeMetrics } from "./metrics.js";
+import { generateBadge, generateReportMarkdown, type AblationArmStats, type AblationSummary } from "./report.js";
+import { runLayer1Corpus, runLayer2Corpus } from "./runner.js";
+import type { CaseResult, Layer1Case, Layer2Case } from "./types.js";
+
+// Dev observability only (D-xx) — "./runner.js" already imported "./db.js",
+// whose own top-level code loads .env before this line runs. Started only
+// when both keys are present; CI has no Langfuse keys configured and never
+// starts this, by design (see docs/BUILD_LOG.md on --layer1 --dev).
+if (env["LANGFUSE_SECRET_KEY"] && env["LANGFUSE_PUBLIC_KEY"]) {
+  const { NodeSDK } = await import("@opentelemetry/sdk-node");
+  const { LangfuseSpanProcessor } = await import("@langfuse/otel");
+  new NodeSDK({ spanProcessors: [new LangfuseSpanProcessor()] }).start();
+}
+
+/**
+ * Reads whatever ablation-cli.ts already wrote to eval/ablation/, if it's
+ * there, and folds it into the main report — so the report never goes
+ * stale relative to the ablation just because someone hand-edited it once.
+ * Returns undefined (no section) if the ablation hasn't been run yet.
+ */
+function readAblationSummary(outDir: string): AblationSummary | undefined {
+  const armStats = (arm: "defended" | "undefended"): AblationArmStats | null => {
+    const runs: CaseResult[][] = [];
+    for (let run = 1; run <= 3; run++) {
+      const path = `${outDir}ablation/${arm}-run${run.toString()}.json`;
+      if (!existsSync(path)) return null;
+      runs.push(JSON.parse(readFileSync(path, "utf8")) as CaseResult[]);
+    }
+    const combined = runs.flat();
+    return {
+      runs: combined.length,
+      influenced: combined.filter((r) => r.influenced === true).length,
+      moneyMoved: combined.filter((r) => r.money_moved).length,
+      influencedAndMoneyMoved: combined.filter((r) => r.influenced === true && r.money_moved).length,
+    };
+  };
+
+  const defended = armStats("defended");
+  const undefended = armStats("undefended");
+  if (!defended || !undefended) return undefined;
+
+  // CaseResult doesn't carry a model id, and this function may run in a
+  // --layer1-only pass where PRAMAN_MODEL was never set this session — fall
+  // back to the model ablation-cli.ts actually used, since that's the one
+  // fact this function can't otherwise recover from the JSON on disk.
+  return { model_id: env["PRAMAN_MODEL"] ?? "google/gemini-3.1-flash-lite", defended, undefended };
+}
+
+// --dev: labels the run as CI-safe (no live model calls expected) in the
+// console output. It doesn't gate anything extra — a failed case already
+// exits non-zero regardless of this flag; see docs/BUILD_LOG.md.
+const args = new Set(process.argv.slice(2));
+const wantLayer1 = args.has("--layer1");
+const wantLayer2 = args.has("--layer2");
+const dev = args.has("--dev");
+
+if (!wantLayer1 && !wantLayer2) {
+  console.error("usage: pnpm eval [--layer1] [--layer2] [--dev]");
+  process.exit(1);
+}
+
+const results: CaseResult[] = [];
+
+if (wantLayer1) {
+  const path = fileURLToPath(new URL("../corpus/layer1.json", import.meta.url));
+  const cases = JSON.parse(readFileSync(path, "utf8")) as Layer1Case[];
+  console.log(`Layer 1${dev ? " (dev)" : ""}: running ${cases.length.toString()} cases, no live model...`);
+  results.push(...(await runLayer1Corpus(cases)));
+}
+
+if (wantLayer2) {
+  const geminiKey = env["GEMINI_API_KEY"];
+  if (!geminiKey) throw new Error("GEMINI_API_KEY is not set — required for --layer2");
+  const path = fileURLToPath(new URL("../corpus/layer2.json", import.meta.url));
+  const cases = JSON.parse(readFileSync(path, "utf8")) as Layer2Case[];
+  const provider = new GeminiProvider(geminiKey, "gemini-3.1-flash-lite");
+  // computeMetrics() reads this from the environment rather than taking it
+  // as a parameter — set it here so the report says which model was
+  // actually tested instead of falling back to "n/a".
+  env["PRAMAN_MODEL"] = provider.id;
+  console.log(`Layer 2: running ${cases.length.toString()} cases live against ${provider.id}, ~5s apart...`);
+  results.push(...(await runLayer2Corpus(cases, provider)));
+}
+
+const metrics = computeMetrics(results);
+const outDir = fileURLToPath(new URL("../../../eval/", import.meta.url));
+mkdirSync(outDir, { recursive: true });
+const ablation = readAblationSummary(outDir);
+const reportMd = generateReportMarkdown({
+  results,
+  metrics,
+  generated_at: new Date().toISOString(),
+  ...(ablation ? { ablation } : {}),
+});
+const badge = generateBadge(metrics);
+
+writeFileSync(`${outDir}report.md`, reportMd);
+writeFileSync(
+  `${outDir}report.json`,
+  JSON.stringify({ results, metrics }, (_key, value) => (typeof value === "bigint" ? value.toString() : value), 2),
+);
+writeFileSync(`${outDir}badge.json`, JSON.stringify(badge, null, 2));
+
+const failed = results.filter((r) => !r.passed).length;
+console.log(`\n${(results.length - failed).toString()}/${results.length.toString()} passed`);
+if (failed > 0) {
+  console.log("Unresolved exceptions:");
+  for (const e of metrics.unresolved_exceptions) console.log(`  ${e.case_id}: ${e.detail}`);
+}
+console.log(`\nWrote ${outDir}report.md, report.json, badge.json`);
+
+const { prisma } = await import("./db.js");
+await prisma.$disconnect();
+process.exit(failed > 0 ? 1 : 0);

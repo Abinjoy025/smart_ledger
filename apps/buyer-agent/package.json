@@ -1,0 +1,22 @@
+{
+  "name": "@praman/buyer-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@langfuse/otel": "5.11.1",
+    "@langfuse/tracing": "5.11.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@opentelemetry/sdk-node": "0.222.0",
+    "@praman/agent-core": "workspace:*",
+    "@praman/control-plane": "workspace:*",
+    "@praman/db": "workspace:*",
+    "@praman/mandate": "workspace:*",
+    "@praman/policy": "workspace:*",
+    "@praman/paypal-exec": "workspace:*",
+    "@praman/shared": "workspace:*",
+    "dotenv": "^17.4.2"
+  }
+}

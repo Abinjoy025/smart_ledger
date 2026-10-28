@@ -1,0 +1,220 @@
+import { createHash } from "node:crypto";
+import { getActiveTraceId, startActiveObservation, startObservation } from "@langfuse/tracing";
+import { wrapUntrusted } from "@praman/shared";
+import type { ConversationItem, ModelProvider, TokenUsage } from "@praman/agent-core";
+import { createCatalogClient, type CatalogClient } from "./catalog-client.js";
+import { TOOLS } from "./tools.js";
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_NO_DEFENCE } from "./prompt.js";
+
+/** Bounded so an injected loop cannot burn budget or probe indefinitely. */
+const MAX_TURNS = 12;
+
+export interface ProposedCart {
+  readonly merchant_id: string;
+  readonly line_items: readonly { sku: string; qty: number }[];
+  readonly rationale: string;
+}
+
+/**
+ * Which defence prompt was active, and which ablation flags, when a
+ * purchase was proposed — an audit fact (D-xx), not just a debugging
+ * convenience, so this is what ends up in the ledger's agent_transcript
+ * event, not only in Langfuse. The prompt itself is never recorded here
+ * (it's not secret, but the hash is cheaper and sufficient to prove which
+ * exact prompt text was active).
+ */
+export interface PromptProvenance {
+  readonly system_prompt_sha256: string;
+  readonly no_delimiter: boolean;
+  readonly no_prompt_defence: boolean;
+}
+
+export type AgentResult =
+  | {
+      readonly kind: "PROPOSED";
+      readonly cart: ProposedCart;
+      readonly transcript: readonly ConversationItem[];
+      readonly modelId: string;
+      readonly usage?: TokenUsage;
+      /** Non-evidentiary pointer to this run's Langfuse trace, if tracing is configured. See D-xx. */
+      readonly langfuseTraceId?: string;
+      readonly promptProvenance: PromptProvenance;
+    }
+  | {
+      readonly kind: "NO_PROPOSAL";
+      readonly reason: string;
+      readonly transcript: readonly ConversationItem[];
+      readonly modelId: string;
+      readonly usage?: TokenUsage;
+      readonly langfuseTraceId?: string;
+      readonly promptProvenance: PromptProvenance;
+    }
+  | {
+      readonly kind: "TURN_LIMIT";
+      readonly transcript: readonly ConversationItem[];
+      readonly modelId: string;
+      readonly usage?: TokenUsage;
+      readonly langfuseTraceId?: string;
+      readonly promptProvenance: PromptProvenance;
+    };
+
+/** Summed across every provider.send() call in one runAgent() — a goal can take several turns, and total spend is the sum, not the last turn's alone. */
+function sumUsage(a: TokenUsage | undefined, b: TokenUsage | undefined): TokenUsage | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    ...(a.cached_input !== undefined || b.cached_input !== undefined
+      ? { cached_input: (a.cached_input ?? 0) + (b.cached_input ?? 0) }
+      : {}),
+    // Only when EVERY summed turn reported its own total — a partial sum
+    // would understate spend while looking like a real total.
+    ...(a.total !== undefined && b.total !== undefined ? { total: a.total + b.total } : {}),
+  };
+}
+
+/**
+ * Ablation-only escape hatch. Read live, per call, not cached — the
+ * ablation runner toggles this mid-process across arms. Every real run
+ * (demo, eval, anything without this env var) delimits merchant text; D-07
+ * is untouched.
+ */
+function wrapMerchantText(text: string): string {
+  return process.env["PRAMAN_NO_DELIMITER"] === "1" ? text : wrapUntrusted(text);
+}
+
+// Titles and descriptions are merchant-authored regardless of which
+// CatalogClient fetched them — wrapping happens here, once, at the
+// boundary where this text is about to enter a prompt (D-07), not inside
+// either client implementation.
+async function runTool(name: string, input: Record<string, unknown>, catalog: CatalogClient): Promise<string> {
+  if (name === "list_catalog") {
+    const category = typeof input["category"] === "string" ? input["category"] : undefined;
+    const items = await catalog.listCatalog(category);
+    return items
+      .map(
+        (i) =>
+          `sku=${i.sku} category=${i.category} price_paise=${i.price_paise} in_stock=${i.in_stock}\n` +
+          wrapMerchantText(`${i.title}\n${i.description}`),
+      )
+      .join("\n\n");
+  }
+
+  if (name === "get_sku") {
+    const item = await catalog.getSku(String(input["sku"]));
+    if (!item) return `No such SKU: ${String(input["sku"])}`;
+    return (
+      `sku=${item.sku} category=${item.category} price_paise=${item.price_paise} in_stock=${item.in_stock}\n` +
+      wrapMerchantText(`${item.title}\n${item.description}`)
+    );
+  }
+
+  return `Unknown tool: ${name}`;
+}
+
+/**
+ * Dev-observability only — see D-xx. Wraps the whole goal in one Langfuse
+ * trace so every model call and tool call below nests under it via ambient
+ * OpenTelemetry context. With no Langfuse keys configured at the entrypoint,
+ * no SDK ever starts and this is a standard OTel no-op (proven by
+ * TracedProvider's own tests, which run in exactly that state).
+ */
+export async function runAgent(provider: ModelProvider, goal: string, merchantId: string): Promise<AgentResult> {
+  // Read live, not hoisted to module scope — the ablation runner toggles
+  // these mid-process across arms (same reasoning as wrapMerchantText).
+  const noPromptDefence = process.env["PRAMAN_NO_PROMPT_DEFENCE"] === "1";
+  const systemPrompt = noPromptDefence ? SYSTEM_PROMPT_NO_DEFENCE : SYSTEM_PROMPT;
+  const promptProvenance: PromptProvenance = {
+    system_prompt_sha256: createHash("sha256").update(systemPrompt, "utf8").digest("hex"),
+    no_delimiter: process.env["PRAMAN_NO_DELIMITER"] === "1",
+    no_prompt_defence: noPromptDefence,
+  };
+
+  return startActiveObservation(
+    "agent-run",
+    async (agentObs) => {
+      agentObs.update({ input: { goal, merchant_id: merchantId }, metadata: { prompt_provenance: promptProvenance } });
+      const result = await runAgentInner(provider, goal, merchantId, systemPrompt);
+      agentObs.update({ output: result });
+      const langfuseTraceId = getActiveTraceId();
+      return { ...result, promptProvenance, ...(langfuseTraceId !== undefined ? { langfuseTraceId } : {}) };
+    },
+    { asType: "agent" },
+  );
+}
+
+// Plain Omit flattens a discriminated union into one shape with optional
+// members instead of preserving each variant — this distributes it over
+// AgentResult's branches first, so "kind" still narrows the rest correctly.
+type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
+
+async function runAgentInner(
+  provider: ModelProvider,
+  goal: string,
+  merchantId: string,
+  systemPrompt: string,
+): Promise<DistributiveOmit<AgentResult, "promptProvenance">> {
+  const history: ConversationItem[] = [{ role: "user", text: `Merchant: ${merchantId}\nGoal: ${goal}` }];
+
+  // One client for the whole call, not one per tool call — under PRAMAN_MCP=1
+  // that's one subprocess per runAgent(), not one per list_catalog/get_sku.
+  const catalog = createCatalogClient(merchantId);
+  let usage: TokenUsage | undefined;
+  try {
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+      const res = await provider.send(systemPrompt, history, TOOLS);
+      usage = sumUsage(usage, res.usage);
+
+      if (res.kind === "TEXT") {
+        return {
+          kind: "NO_PROPOSAL",
+          reason: res.text,
+          transcript: history,
+          modelId: provider.id,
+          ...(usage !== undefined ? { usage } : {}),
+        };
+      }
+
+      let proposed: ProposedCart | null = null;
+      const toolResults: { id: string; name: string; content: string }[] = [];
+
+      for (const call of res.calls) {
+        if (call.name === "propose_intent") {
+          const span = startObservation("propose-intent", { input: call.input }, { asType: "tool" });
+          proposed = {
+            merchant_id: String(call.input["merchant_id"]),
+            line_items: (call.input["line_items"] as { sku: string; qty: number }[] | undefined) ?? [],
+            rationale: String(call.input["rationale"] ?? ""),
+          };
+          span.update({ output: proposed }).end();
+          break;
+        }
+        const span = startObservation(call.name, { input: call.input }, { asType: "tool" });
+        // The exact wrapped text the model received, delimiters included —
+        // the same string that reaches the prompt, not a summary of it.
+        const content = await runTool(call.name, call.input, catalog);
+        span.update({ output: content }).end();
+        toolResults.push({ id: call.id, name: call.name, content });
+      }
+
+      history.push({ role: "assistant", calls: res.calls, text: "", raw: res.raw });
+
+      if (proposed) {
+        return {
+          kind: "PROPOSED",
+          cart: proposed,
+          transcript: history,
+          modelId: provider.id,
+          ...(usage !== undefined ? { usage } : {}),
+        };
+      }
+
+      history.push({ role: "tool_results", results: toolResults });
+    }
+  } finally {
+    await catalog.close();
+  }
+
+  return { kind: "TURN_LIMIT", transcript: history, modelId: provider.id, ...(usage !== undefined ? { usage } : {}) };
+}
